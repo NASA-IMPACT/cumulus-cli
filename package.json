@@ -1,0 +1,49 @@
+{
+  "name": "cumulus-cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for the NASA Cumulus API",
+  "author": "",
+  "main": "target/main/cumulus.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NASA-IMPACT/cumulus-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NASA-IMPACT/cumulus-cli/issues"
+  },
+  "homepage": "https://github.com/NASA-IMPACT/cumulus-cli#readme",
+  "license": "Apache-2.0",
+  "bin": {
+    "cumulus": "bin/cumulus"
+  },
+  "engines": {
+    "node": ">=14.19.1"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "cumulus": "npm run build && node target/main/cumulus.js",
+    "test:lint": "eslint src --ext .ts",
+    "test:prettier": "prettier \"src/**/*.ts\" --list-different"
+  },
+  "devDependencies": {
+    "@aws-sdk/abort-controller": "^3.0.0",
+    "@aws-sdk/smithy-client": "^3.0.0",
+    "@tsconfig/recommended": "^1.0.1",
+    "@types/lodash": "^4.14.182",
+    "@types/node": "^18.6.1",
+    "@typescript-eslint/eslint-plugin": "^5.31.0",
+    "@typescript-eslint/parser": "^5.31.0",
+    "eslint": "^8.20.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-eslint-comments": "^3.2.0",
+    "eslint-plugin-functional": "^4.2.2",
+    "eslint-plugin-import": "^2.26.0",
+    "prettier": "^2.7.1",
+    "typescript": "^4.7.4"
+  },
+  "dependencies": {
+    "@cumulus/api-client": "^13.1.0",
+    "cmd-ts": "^0.11.0",
+    "lodash": "4.17.21"
+  }
+}

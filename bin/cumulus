@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+node "$(readlink -f "${BASH_SOURCE:-${0}}")/../../target/main/cumulus.js" "$@"
