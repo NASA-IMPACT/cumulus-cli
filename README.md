@@ -16,15 +16,16 @@ Once the items above are installed, and until the Cumulus CLI is released as an
 NPM package, you may install it as follows, after opening a terminal window and
 changing to your desired parent directory:
 
-1. Use `git` to clone this repository into a subdirectory of the current
-   directory.
-1. Change directory to the repository subdirectory.
+1. Use `git` to clone this repository into your directory of choice.
+1. Change directory to the repository directory.
 1. Run `nvm install` to install the correct versions of `npm` and `node` (as
    specified in `.nvmrc`) for subsequent commands.
 1. Run `npm install` to install library dependencies.
 1. Run `npm run build` to build the Cumulus CLI.
 1. Run `npm install --global` to install `cumulus` (the Cumulus CLI) as a global
    command to allow its use from any directory.
+1. Run `ln -s "$(which cumulus)" /usr/local/bin/cumulus` to make the `cumulus`
+   command available regardless of which version of Node is currently active.
 
 After completing the steps above, in order to later obtain enhancements and bug
 fixes committed to this repository, do the following from a terminal window,
@@ -36,6 +37,7 @@ nvm install
 npm install
 npm run build
 npm install --global
+ln -s "$(which cumulus)" /usr/local/bin/cumulus
 ```
 
 ## Usage
