@@ -52,7 +52,9 @@ const JSONData: Cmd.Type<string, string> = {
 
   async from(dataOrPath) {
     // Parse only to validate, returning original string, not parsed value.
-    if (Result.isOk(safe(JSON.parse)(dataOrPath))) return dataOrPath;
+    if (Result.isOk(safe(JSON.parse)(dataOrPath))) {
+      return dataOrPath;
+    }
 
     // Invalid JSON, so see if it's a file path
     const stats = safe(FS.statSync)(dataOrPath);
@@ -221,18 +223,8 @@ function listAsyncOperationsCmd(client: Client) {
   return Cmd.command({
     name: "list",
     description: "List async operations",
-    args: {
-      ...globalArgs,
-      params: listArgs.params,
-    },
-    handler: fp.pipe(
-      ({ params, ...rest }) => ({
-        ...rest,
-        params: Object.fromEntries(params),
-      }),
-      client.get("/asyncOperations"),
-      andThen(fp.prop("results"))
-    ),
+    args: listArgs,
+    handler: list("/asyncOperations")(client),
   });
 }
 
@@ -319,7 +311,9 @@ function replaceCollectionCmd(client: Client) {
 function replaceCollection(client: Client) {
   return ({ prefix, data }: { readonly prefix: string; readonly data: string }) => {
     const result = safe(JSON.parse)(data);
-    if (Result.isErr(result)) return Promise.reject(result.error);
+    if (Result.isErr(result)) {
+      return Promise.reject(result.error);
+    }
     const { name, version } = result.value;
     return client.put(`/collections/${name}/${version}`)({ prefix, data });
   };
@@ -329,12 +323,8 @@ function listCollectionsCmd(client: Client) {
   return Cmd.command({
     name: "list",
     description: "List collections",
-    args: {
-      ...globalArgs,
-      // TODO: Support listing fields to include
-      // fields: Cmd.multioption,
-    },
-    handler: fp.pipe(client.get("/collections"), andThen(fp.prop("results"))),
+    args: listArgs,
+    handler: list("/collections")(client),
   });
 }
 
@@ -482,18 +472,34 @@ function findExecutionsByGranulesListCmd(client: Client) {
     description: "Find executions associated with specified list of granules",
     args: {
       ...globalArgs,
+      ...listArgs,
       collectionId: Cmd.option({
-        type: Cmd.string,
+        type: Cmd.optional(Cmd.string),
         long: "collection-id",
         description: "ID of the granule's collection",
       }),
       granuleId: Cmd.option({
-        type: Cmd.string,
+        type: Cmd.optional(Cmd.string),
         long: "granule-id",
         description: "ID of the granule",
       }),
+      data: Cmd.option({
+        type: Cmd.optional(JSONData),
+        long: "data",
+        short: "d",
+      }),
     },
-    handler: client.get("/executions/search-by-granules"),
+    handler: async ({ collectionId, granuleId, data, ...restOptions }) => {
+      // The /executions/search-by-granules endpoint does not support field
+      // selection, so we need to manually select fields, if supplied.
+      const fields = restOptions.fields?.split(",").map((field) => field.trim());
+      const executions = await list("/executions/search-by-granules")(client)({
+        ...restOptions,
+        data: data ?? { granules: [{ collectionId, granuleId }] },
+      });
+
+      return fields ? executions.map(fp.pick(fields)) : executions;
+    },
   });
 }
 
@@ -501,15 +507,8 @@ function listExecutionsCmd(client: Client) {
   return Cmd.command({
     name: "list",
     description: "List executions",
-    args: {
-      ...globalArgs,
-      params: listArgs.params,
-    },
-    handler: ({ prefix, params }) =>
-      client.get("/executions")({
-        prefix,
-        params: Object.fromEntries(params),
-      }),
+    args: listArgs,
+    handler: list("/executions")(client),
   });
 }
 
@@ -526,8 +525,34 @@ function granulesCmd(client: Client) {
       unpublish: granulesUnpublishCmd(client),
       delete: granulesDeleteCmd(client),
       reingest: granulesReingestCmd(client),
+      process: granulesProcessCmd(client),
       list: granulesListCmd(client),
     },
+  });
+}
+
+function granulesProcessCmd(client: Client) {
+  return Cmd.command({
+    name: "process",
+    description: "Process a granule via a workflow",
+    args: {
+      ...globalArgs,
+      id: Cmd.option({
+        type: Cmd.string,
+        long: "id",
+        description: "ID of the granule to process",
+      }),
+      workflow: Cmd.option({
+        type: Cmd.string,
+        long: "workflow",
+        description: "Name of the workflow (step function) to run",
+      }),
+    },
+    handler: ({ prefix, id, workflow }) =>
+      client.put(`/granules/${id}`)({
+        prefix,
+        data: { action: "applyWorkflow", workflow },
+      }),
   });
 }
 
@@ -583,49 +608,54 @@ function granulesGetCmd(client: Client) {
   });
 }
 
-function listGranules(client: Client) {
-  return async ({
-    prefix,
-    all = false,
-    limit = 10,
-    page = 1,
-    params = [],
-    ...listParams
-  }: {
-    readonly prefix: string;
-    readonly all?: boolean;
-    readonly limit?: number;
-    readonly page?: number;
-    readonly params?: readonly (readonly [string, string])[];
-    readonly [key: string]: unknown;
-  }) => {
-    async function getPage(page: number) {
-      const response = await client.get("/granules")({
-        prefix,
-        params: {
-          limit: all ? "100" : `${limit}`,
-          page: `${page}`,
-          ...Object.fromEntries(params),
-          ...listParams,
-        },
-      });
-      const results = fp.prop("results", response);
+function list(path: string) {
+  return (client: Client) => {
+    return async ({
+      prefix,
+      all = false,
+      limit = 10,
+      page = 1,
+      params = [],
+      ...restOptions
+    }: {
+      readonly prefix: string;
+      readonly all?: boolean;
+      readonly limit?: number;
+      readonly page?: number;
+      readonly params?: readonly (readonly [string, string])[];
+      readonly data?: unknown;
+      readonly [key: string]: unknown;
+    }) => {
+      const allItems = [];
+      const {data} = restOptions;
+      const queryParams = {
+        ...Object.fromEntries(params),
+        ...fp.omit("data", restOptions),
+        limit: all ? "100" : String(limit),
+      };
+      const getOrPost = "data" in restOptions ? client.post : client.get;
+      const paramsWithPage = (page: number) => ({ ...queryParams, page: `${page}` });
+      const requestPage = async (page: number) => {
+        const options = { prefix, params: paramsWithPage(page), data };
+        const response = await getOrPost(path)(options);
+        const results = fp.prop("results", response);
 
-      return Array.isArray(results)
-        ? results.length > 0 && { output: results, input: page + 1 }
-        : Promise.reject(new Error(responseErrorMessage(response)));
-    }
+        return Array.isArray(results)
+          ? results.length > 0 && { output: results, input: page + 1 }
+          : Promise.reject(new Error(responseErrorMessage(response)));
+      };
 
-    const granules = [];
+      // eslint-disable-next-line functional/no-loop-statement
+      for await (const pageOfItems of asyncUnfold(requestPage)(page)) {
+        // eslint-disable-next-line functional/immutable-data
+        allItems.push(...pageOfItems);
+        if (!all && allItems.length >= limit) {
+          break;
+        }
+      }
 
-    // eslint-disable-next-line functional/no-loop-statement
-    for await (const items of asyncUnfold(getPage)(page)) {
-      // eslint-disable-next-line functional/immutable-data
-      granules.push(...items);
-      if (!all && granules.length >= limit) break;
-    }
-
-    return all || granules.length <= limit ? granules : granules.slice(0, limit);
+      return all || allItems.length <= limit ? allItems : allItems.slice(0, limit);
+    };
   };
 }
 
@@ -634,14 +664,15 @@ function granulesListCmd(client: Client) {
     name: "list",
     description: "List granules",
     args: listArgs,
-    handler: listGranules(client),
+    handler: list("/granules")(client),
   });
 }
 
 function granulesReingestCmd(client: Client) {
   return Cmd.command({
     name: "reingest",
-    description: "Reingest a granule",
+    description:
+      "Reingest a granule (https://nasa.github.io/cumulus-api/#reingest-granule)",
     args: {
       ...globalArgs,
       id: Cmd.option({
@@ -650,15 +681,21 @@ function granulesReingestCmd(client: Client) {
         description: "ID of the granule to reingest",
       }),
       executionArn: Cmd.option({
-        type: Cmd.string,
+        type: Cmd.optional(Cmd.string),
         long: "execution-arn",
-        description: "ARN of the execution",
+        description: "ARN of the execution (alternatively, supply workflow-name)",
+      }),
+      workflowName: Cmd.option({
+        type: Cmd.optional(Cmd.string),
+        long: "workflow-name",
+        description:
+          "Name of the workflow (step function) (ignored if execution-arn supplied)",
       }),
     },
-    handler: ({ prefix, id, executionArn }) =>
+    handler: ({ prefix, id, executionArn, workflowName }) =>
       client.put(`/granules/${id}`)({
         prefix,
-        data: { action: "reingest", executionArn },
+        data: { action: "reingest", executionArn, workflowName },
       }),
   });
 }
@@ -776,12 +813,8 @@ function listProvidersCmd(client: Client) {
   return Cmd.command({
     name: "list",
     description: "List providers",
-    args: {
-      ...globalArgs,
-      // TODO: Support listing fields to include
-      // fields: Cmd.multioption,
-    },
-    handler: fp.pipe(client.get("/providers"), andThen(fp.prop("results"))),
+    args: listArgs,
+    handler: list("/providers")(client),
   });
 }
 
@@ -982,12 +1015,8 @@ function listRulesCmd(client: Client) {
   return Cmd.command({
     name: "list",
     description: "List rules",
-    args: {
-      ...globalArgs,
-      // TODO: Support listing fields to include
-      // fields: Cmd.multioption,
-    },
-    handler: fp.pipe(client.get("/rules"), andThen(fp.prop("results"))),
+    args: listArgs,
+    handler: list("/rules")(client),
   });
 }
 
@@ -1086,11 +1115,11 @@ function request({
 
   return invoke(invokeParams).then(
     fp.pipe(
+      // TODO Add --verbose option
+      // fp.tap((response) => console.log("RESPONSE:", response)),
       fp.propOr("{}")("body"),
       fp.wrap(JSON.parse),
       fp.attempt,
-      // TODO Add --verbose option
-      // fp.tap(console.log),
       fp.cond([
         [fp.isError, (error) => Promise.reject(error)],
         [
@@ -1118,7 +1147,9 @@ const isRunnerOutput = (u: unknown): u is RunnerOutput =>
   !fp.isNil(u) && fp.isObject(u) && fp.has("command", u) && fp.has("value", u);
 
 const leaf = (output: unknown): string => {
-  if (isRunnerOutput(output)) return leaf(output.value);
+  if (isRunnerOutput(output)) {
+    return leaf(output.value);
+  }
   return typeof output === "string" ? output : JSON.stringify(output, null, 2);
 };
 
