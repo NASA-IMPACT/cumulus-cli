@@ -627,7 +627,7 @@ function list(path: string) {
       readonly [key: string]: unknown;
     }) => {
       const allItems = [];
-      const {data} = restOptions;
+      const { data } = restOptions;
       const queryParams = {
         ...Object.fromEntries(params),
         ...fp.omit("data", restOptions),
@@ -1097,7 +1097,7 @@ function request({
     resource: "/{proxy+}",
     httpMethod: method,
     path,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Cumulus-API-Version": "2", "Content-Type": "application/json" },
     ...(params ? { queryStringParameters: params } : {}),
     ...(body ? { body } : {}),
   };

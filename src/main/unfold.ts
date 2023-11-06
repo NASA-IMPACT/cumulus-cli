@@ -7,7 +7,6 @@
  * `null`, or `false` (indicating that unfolding is complete, and the unary
  * function should not be called again).
  *
- * @typedef UnfoldResult
  * @type {[T, U] | undefined | null | false}
  * @template T - type of the argument expected by the function that returns this
  *    `UnfoldResult` type
