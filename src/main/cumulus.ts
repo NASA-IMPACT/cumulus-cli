@@ -915,26 +915,9 @@ function setRuleState(client: Client, state: string) {
   }) => {
     const rule = (await client.get(`/rules/${name}`)({ prefix })) as Rule;
 
-    // NOTE: We add a { meta: { rule: { state } } } to the rule definition due to a bug
-    // in Cumulus, where a onetime rule ALWAYS triggers its corresponding workflow when
-    // the rule is created, even when its "state" is set to "DISABLED".  This additional
-    // metadata can be used in the DiscoverAndQueueGranules workflow to end execution as
-    // soon as it sees there is either no such metadata value, or it is not set to
-    // 'ENABLED'.  This additional metadata is necessary because Cumulus does not
-    // include the entire rule definition as input to the triggered workflow, but rather
-    // only the rule's metadata. This should be removed if and when the Cumulus bug is
-    // fixed.
-    const meta = {
-      ...(rule.meta ?? {}),
-      rule: {
-        ...(rule.meta?.rule ?? {}),
-        state,
-      },
-    };
-
     return client.put(`/rules/${rule.name}`)({
       prefix,
-      data: { ...rule, state, meta },
+      data: { ...rule, state },
     });
   };
 }

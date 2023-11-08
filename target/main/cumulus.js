@@ -167,7 +167,6 @@ function mkApp(client) {
             elasticsearch: elasticsearchCmd(client),
             executions: executionsCmd(client),
             granules: granulesCmd(client),
-            orca: orcaCmd(client),
             providers: providersCmd(client),
             rules: rulesCmd(client),
             stats: statsCmd(client),
@@ -595,95 +594,6 @@ function granulesReingestCmd(client) {
     });
 }
 //------------------------------------------------------------------------------
-// COMMAND: orca
-//------------------------------------------------------------------------------
-function orcaCmd(client) {
-    return Cmd.subcommands({
-        name: "orca",
-        description: "Invoke the ORCA API",
-        cmds: {
-            catalog: orcaCatalogCmd(client),
-            recovery: orcaRecoveryCmd(client),
-        },
-    });
-}
-function orcaCatalogCmd(client) {
-    return Cmd.subcommands({
-        name: "catalog",
-        description: "ORCA Catalog Reporting API",
-        cmds: {
-            reconcile: orcaCatalogReconcileCmd(client),
-        },
-    });
-}
-function orcaCatalogReconcileCmd(client) {
-    return Cmd.command({
-        name: "reconcile",
-        description: "List the ORCA catalog",
-        args: Object.assign(Object.assign({}, globalArgs), { pageIndex: Cmd.option({
-                type: Cmd.number,
-                long: "page-index",
-                short: "p",
-                description: "The 0-based index of the results page to return",
-                defaultValue: () => 0,
-                defaultValueIsSerializable: true,
-            }), endTimestamp: Cmd.option({
-                type: Cmd.number,
-                long: "end-timestamp",
-                short: "e",
-                description: "Cumulus granule createdAt end-time for date range to compare data," +
-                    " in milliseconds since midnight 1 January 1970 UTC",
-                defaultValue: () => Date.now(),
-                defaultValueIsSerializable: true,
-            }) }),
-        handler: client.post("/orca/catalog/reconcile"),
-    });
-}
-function orcaRecoveryCmd(client) {
-    return Cmd.subcommands({
-        name: "recovery",
-        description: "ORCA Recovery API",
-        cmds: {
-            granules: orcaRecoveryGranulesCmd(client),
-            jobs: orcaRecoveryJobsCmd(client),
-        },
-    });
-}
-function orcaRecoveryGranulesCmd(client) {
-    return Cmd.command({
-        name: "granules",
-        description: "Display detailed recovery job information",
-        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
-                type: Cmd.optional(Cmd.string),
-                long: "collection-id",
-                description: "ID of the granule's collection",
-            }), granuleId: Cmd.option({
-                type: Cmd.optional(Cmd.string),
-                long: "granule-id",
-                description: "ID of the granule",
-            }), asyncOperationId: Cmd.option({
-                type: Cmd.optional(Cmd.string),
-                long: "async-operation-id",
-                description: "Unique ID of the asyncOperation of the recovery job created via the" +
-                    " 'orca recovery granules' command",
-            }) }),
-        handler: client.post("/orca/recovery/granules"),
-    });
-}
-function orcaRecoveryJobsCmd(client) {
-    return Cmd.command({
-        name: "jobs",
-        description: "Display detailed recovery job information",
-        args: Object.assign(Object.assign({}, globalArgs), { asyncOperationId: Cmd.option({
-                type: Cmd.string,
-                long: "async-operation-id",
-                description: "Unique ID of the asyncOperation of the recovery job created via the" +
-                    " 'orca recovery granules' command",
-            }) }),
-        handler: client.post("/orca/recovery/jobs"),
-    });
-}
-//------------------------------------------------------------------------------
 // COMMAND: providers
 //------------------------------------------------------------------------------
 function providersCmd(client) {
@@ -835,21 +745,10 @@ function setRuleStateCmd(client, state) {
 }
 function setRuleState(client, state) {
     return ({ prefix, name, }) => __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
         const rule = (yield client.get(`/rules/${name}`)({ prefix }));
-        // NOTE: We add a { meta: { rule: { state } } } to the rule definition due to a bug
-        // in Cumulus, where a onetime rule ALWAYS triggers its corresponding workflow when
-        // the rule is created, even when its "state" is set to "DISABLED".  This additional
-        // metadata can be used in the DiscoverAndQueueGranules workflow to end execution as
-        // soon as it sees there is either no such metadata value, or it is not set to
-        // 'ENABLED'.  This additional metadata is necessary because Cumulus does not
-        // include the entire rule definition as input to the triggered workflow, but rather
-        // only the rule's metadata. This should be removed if and when the Cumulus bug is
-        // fixed.
-        const meta = Object.assign(Object.assign({}, ((_a = rule.meta) !== null && _a !== void 0 ? _a : {})), { rule: Object.assign(Object.assign({}, ((_c = (_b = rule.meta) === null || _b === void 0 ? void 0 : _b.rule) !== null && _c !== void 0 ? _c : {})), { state }) });
         return client.put(`/rules/${rule.name}`)({
             prefix,
-            data: Object.assign(Object.assign({}, rule), { state, meta }),
+            data: Object.assign(Object.assign({}, rule), { state }),
         });
     });
 }
@@ -974,8 +873,7 @@ function request({ prefix, method, path, params, data, invoke = cumulusApiClient
     // console.log(payload);
     return invoke(invokeParams).then(fp.pipe(
     // TODO Add --verbose option
-    /// eslint-disable-next-line functional/no-return-void
-    // tap((response) => console.log("RESPONSE:", response)),
+    // fp.tap((response) => console.log("RESPONSE:", response)),
     fp.propOr("{}")("body"), fp.wrap(JSON.parse), fp.attempt, fp.cond([
         [fp.isError, (error) => Promise.reject(error)],
         [
