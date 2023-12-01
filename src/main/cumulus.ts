@@ -1092,14 +1092,16 @@ function request({
       onFailedAttempt: fp.pipe(fp.prop("message"), console.error),
     },
   };
+  // UGLY HACK!
+  const debug = Boolean(process.env.DEBUG)
 
-  // TODO Add --verbose option
-  // console.log(payload);
+  if (debug) {
+    console.log("REQUEST:", payload);
+  }
 
   return invoke(invokeParams).then(
     fp.pipe(
-      // TODO Add --verbose option
-      // fp.tap((response) => console.log("RESPONSE:", response)),
+      fp.tap((response) => debug && console.log("RESPONSE:", response)),
       fp.propOr("{}")("body"),
       fp.wrap(JSON.parse),
       fp.attempt,

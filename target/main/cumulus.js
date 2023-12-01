@@ -869,12 +869,12 @@ function request({ prefix, method, path, params, data, invoke = cumulusApiClient
             onFailedAttempt: fp.pipe(fp.prop("message"), console.error),
         },
     };
-    // TODO Add --verbose option
-    // console.log(payload);
-    return invoke(invokeParams).then(fp.pipe(
-    // TODO Add --verbose option
-    // fp.tap((response) => console.log("RESPONSE:", response)),
-    fp.propOr("{}")("body"), fp.wrap(JSON.parse), fp.attempt, fp.cond([
+    // UGLY HACK!
+    const debug = Boolean(process.env.DEBUG);
+    if (debug) {
+        console.log("REQUEST:", payload);
+    }
+    return invoke(invokeParams).then(fp.pipe(fp.tap((response) => debug && console.log("RESPONSE:", response)), fp.propOr("{}")("body"), fp.wrap(JSON.parse), fp.attempt, fp.cond([
         [fp.isError, (error) => Promise.reject(error)],
         [
             fp.overEvery([fp.prop("error"), fp.prop("message")]),
