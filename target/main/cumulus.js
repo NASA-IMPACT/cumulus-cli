@@ -141,7 +141,7 @@ const listArgs = Object.assign(Object.assign({}, globalArgs), { all: Cmd.flag({
     }), fields: Cmd.option({
         type: Cmd.optional(Cmd.string),
         long: "fields",
-        description: "comma-separated list of field names to return in each record" +
+        description: "Comma-separated list of field names to return in each record" +
             " (if not specified, all fields are returned)",
     }) });
 function responseErrorMessage(response) {
@@ -155,6 +155,7 @@ function mkClient(invoke) {
         get: mkMethod("GET"),
         post: mkMethod("POST"),
         put: mkMethod("PUT"),
+        patch: mkMethod("PATCH"),
     };
 }
 function mkApp(client) {
@@ -164,10 +165,12 @@ function mkApp(client) {
         cmds: {
             "async-operations": asyncOperationsCmd(client),
             collections: collectionsCmd(client),
+            "dead-letter-archive": deadLetterArchiveCmd(client),
             elasticsearch: elasticsearchCmd(client),
             executions: executionsCmd(client),
             granules: granulesCmd(client),
             providers: providersCmd(client),
+            "reconciliation-reports": reconciliationReportsCmd(client),
             rules: rulesCmd(client),
             stats: statsCmd(client),
             version: Cmd.command({
@@ -209,7 +212,10 @@ function listAsyncOperationsCmd(client) {
         name: "list",
         description: "List async operations",
         args: listArgs,
-        handler: list("/asyncOperations")(client),
+        handler: (_a) => {
+            var { fields = "id" } = _a, rest = __rest(_a, ["fields"]);
+            return list("/asyncOperations")(client)(Object.assign(Object.assign({}, rest), { fields }));
+        },
     });
 }
 //------------------------------------------------------------------------------
@@ -461,16 +467,20 @@ function granulesProcessCmd(client) {
     return Cmd.command({
         name: "process",
         description: "Process a granule via a workflow",
-        args: Object.assign(Object.assign({}, globalArgs), { id: Cmd.option({
+        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
                 type: Cmd.string,
-                long: "id",
+                long: "collection-id",
+                description: "ID of the collection containing the granule",
+            }), granuleId: Cmd.option({
+                type: Cmd.string,
+                long: "granule-id",
                 description: "ID of the granule to process",
             }), workflow: Cmd.option({
                 type: Cmd.string,
                 long: "workflow",
                 description: "Name of the workflow (step function) to run",
             }) }),
-        handler: ({ prefix, id, workflow }) => client.put(`/granules/${id}`)({
+        handler: ({ prefix, collectionId, granuleId, workflow }) => client.patch(`/granules/${collectionId}/${granuleId}`)({
             prefix,
             data: { action: "applyWorkflow", workflow },
         }),
@@ -480,12 +490,16 @@ function granulesUnpublishCmd(client) {
     return Cmd.command({
         name: "unpublish",
         description: "Unpublish a granule from the CMR",
-        args: Object.assign(Object.assign({}, globalArgs), { id: Cmd.option({
+        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
                 type: Cmd.string,
-                long: "id",
+                long: "collection-id",
+                description: "ID of the collection containing the granule",
+            }), granuleId: Cmd.option({
+                type: Cmd.string,
+                long: "granule-id",
                 description: "ID of the granule to unpublish",
             }) }),
-        handler: ({ prefix, id }) => client.put(`/granules/${id}`)({
+        handler: ({ prefix, collectionId, granuleId }) => client.patch(`/granules/${collectionId}/${granuleId}`)({
             prefix,
             data: { action: "removeFromCmr" },
         }),
@@ -495,24 +509,32 @@ function granulesDeleteCmd(client) {
     return Cmd.command({
         name: "delete",
         description: "Delete a granule (must first be unpublished)",
-        args: Object.assign(Object.assign({}, globalArgs), { id: Cmd.option({
+        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
                 type: Cmd.string,
-                long: "id",
+                long: "collection-id",
+                description: "ID of the collection containing the granule",
+            }), granuleId: Cmd.option({
+                type: Cmd.string,
+                long: "granule-id",
                 description: "ID of the granule to delete",
             }) }),
-        handler: ({ prefix, id }) => client.delete(`/granules/${id}`)({ prefix }),
+        handler: ({ prefix, collectionId, granuleId }) => client.delete(`/granules/${collectionId}/${granuleId}`)({ prefix }),
     });
 }
 function granulesGetCmd(client) {
     return Cmd.command({
         name: "get",
         description: "Get details about a granule",
-        args: Object.assign(Object.assign({}, globalArgs), { id: Cmd.option({
+        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
                 type: Cmd.string,
-                long: "id",
+                long: "collection-id",
+                description: "ID of the collection to which the granule belongs",
+            }), granuleId: Cmd.option({
+                type: Cmd.string,
+                long: "granule-id",
                 description: "ID of the granule to fetch",
             }) }),
-        handler: ({ prefix, id }) => client.get(`/granules/${id}`)({ prefix }),
+        handler: ({ prefix, collectionId, granuleId }) => client.get(`/granules/${collectionId}/${granuleId}`)({ prefix }),
     });
 }
 function list(path) {
@@ -574,9 +596,13 @@ function granulesReingestCmd(client) {
     return Cmd.command({
         name: "reingest",
         description: "Reingest a granule (https://nasa.github.io/cumulus-api/#reingest-granule)",
-        args: Object.assign(Object.assign({}, globalArgs), { id: Cmd.option({
+        args: Object.assign(Object.assign({}, globalArgs), { collectionId: Cmd.option({
                 type: Cmd.string,
-                long: "id",
+                long: "collection-id",
+                description: "ID of the collection containing the granule to reingest",
+            }), granuleId: Cmd.option({
+                type: Cmd.string,
+                long: "granule-id",
                 description: "ID of the granule to reingest",
             }), executionArn: Cmd.option({
                 type: Cmd.optional(Cmd.string),
@@ -587,7 +613,7 @@ function granulesReingestCmd(client) {
                 long: "workflow-name",
                 description: "Name of the workflow (step function) (ignored if execution-arn supplied)",
             }) }),
-        handler: ({ prefix, id, executionArn, workflowName }) => client.put(`/granules/${id}`)({
+        handler: ({ prefix, collectionId, granuleId, executionArn, workflowName }) => client.patch(`/granules/${collectionId}/${granuleId}`)({
             prefix,
             data: { action: "reingest", executionArn, workflowName },
         }),
@@ -685,6 +711,9 @@ function listProvidersCmd(client) {
         handler: list("/providers")(client),
     });
 }
+//------------------------------------------------------------------------------
+// COMMAND: rules
+//------------------------------------------------------------------------------
 function rulesCmd(client) {
     return Cmd.subcommands({
         name: "rules",
@@ -740,16 +769,10 @@ function setRuleStateCmd(client, state) {
                 short: "n",
                 description: "Name of the rule to change",
             }) }),
-        handler: setRuleState(client, state),
-    });
-}
-function setRuleState(client, state) {
-    return ({ prefix, name, }) => __awaiter(this, void 0, void 0, function* () {
-        const rule = (yield client.get(`/rules/${name}`)({ prefix }));
-        return client.put(`/rules/${rule.name}`)({
+        handler: ({ prefix, name }) => client.patch(`/rules/${name}`)({
             prefix,
-            data: Object.assign(Object.assign({}, rule), { state }),
-        });
+            data: { state },
+        }),
     });
 }
 function replaceRuleCmd(client) {
@@ -802,7 +825,7 @@ function runRuleCmd(client) {
                 short: "n",
                 description: "Name of the 'onetime' rule to run",
             }) }),
-        handler: ({ prefix, name }) => client.put(`/rules/${name}`)({ prefix, data: { name, action: "rerun" } }),
+        handler: ({ prefix, name }) => client.patch(`/rules/${name}`)({ prefix, data: { action: "rerun" } }),
     });
 }
 function listRulesCmd(client) {
@@ -843,6 +866,155 @@ function statsCountCmd(client) {
     });
 }
 //------------------------------------------------------------------------------
+// COMMAND: deadLetterArchive
+//------------------------------------------------------------------------------
+function deadLetterArchiveCmd(client) {
+    return Cmd.subcommands({
+        name: "deadLetterArchive",
+        description: "Manage the dead letter archive",
+        cmds: {
+            "recover-cumulus-messages": recoverCumulusMessagesCmd(client),
+        },
+    });
+}
+function recoverCumulusMessagesCmd(client) {
+    return Cmd.command({
+        name: "recover-cumulus-messages",
+        description: "Recover S3 dead letter objects written when DB updates of granule statuses fail",
+        args: Object.assign(Object.assign({}, globalArgs), { bucket: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "bucket",
+                description: "The bucket to read records from (default: system bucket)",
+            }), path: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "path",
+                description: "The S3 prefix (path) to read DLQ records from (default: <prefix>/dead-letter-archive/sqs/)",
+            }) }),
+        handler: ({ prefix, bucket, path }) => {
+            const data = bucket && path
+                ? { bucket, path }
+                : bucket
+                    ? { bucket }
+                    : path
+                        ? { path }
+                        : undefined;
+            return client.post("/deadLetterArchive/recoverCumulusMessages")({ prefix, data });
+        },
+    });
+}
+//------------------------------------------------------------------------------
+// COMMAND: reconciliationReports
+//------------------------------------------------------------------------------
+function reconciliationReportsCmd(client) {
+    return Cmd.subcommands({
+        name: "reconciliationReports",
+        description: "Manage reconciliation reports",
+        cmds: {
+            create: reconciliationReportsCreateCmd(client),
+            get: reconciliationReportsGetCmd(client),
+            delete: reconciliationReportsDeleteCmd(client),
+            list: reconciliationReportsListCmd(client),
+        },
+    });
+}
+function reconciliationReportsListCmd(client) {
+    return Cmd.command({
+        name: "list",
+        description: "List reconciliation reports",
+        args: listArgs,
+        handler: (_a) => {
+            var { fields } = _a, rest = __rest(_a, ["fields"]);
+            return list("/reconciliationReports")(client)(Object.assign(Object.assign({}, rest), { fields }));
+        },
+    });
+}
+function reconciliationReportsGetCmd(client) {
+    return Cmd.command({
+        name: "get",
+        description: "Get a reconciliation report",
+        args: Object.assign(Object.assign({}, globalArgs), { name: Cmd.option({
+                type: Cmd.string,
+                long: "name",
+                short: "n",
+                description: "Name of the report to retrieve",
+            }) }),
+        handler: ({ prefix, name }) => client.get(`/reconciliationReports/${name}`)({ prefix }),
+    });
+}
+function reconciliationReportsDeleteCmd(client) {
+    return Cmd.command({
+        name: "get",
+        description: "Delete a reconciliation report",
+        args: Object.assign(Object.assign({}, globalArgs), { name: Cmd.option({
+                type: Cmd.string,
+                long: "name",
+                short: "n",
+                description: "Name of the report to delete",
+            }) }),
+        handler: ({ prefix, name }) => client.delete(`/reconciliationReports/${name}`)({ prefix }),
+    });
+}
+function reconciliationReportsCreateCmd(client) {
+    return Cmd.command({
+        name: "create",
+        description: "Create a reconciliation report",
+        args: Object.assign(Object.assign({}, globalArgs), { reportName: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "report-name",
+                short: "n",
+                description: "Name of the report (default: combination of report-type and creation date/time)",
+            }), reportType: Cmd.option({
+                type: Cmd.optional(Cmd.oneOf([
+                    "Inventory",
+                    "Granule Inventory",
+                    "Granule Not Found",
+                    "ORCA Backup",
+                    "Internal",
+                ])),
+                long: "report-type",
+                short: "t",
+                description: "Type of report to create",
+                defaultValue: () => "Inventory",
+                defaultValueIsSerializable: true,
+            }), collectionIds: Cmd.multioption({
+                type: Cmd.optional(Cmd.array(Cmd.string)),
+                long: "collection-id",
+                short: "c",
+                description: "Collection ID(s) for comparison of collection and granule holdings",
+            }), granuleIds: Cmd.multioption({
+                type: Cmd.optional(Cmd.array(Cmd.string)),
+                long: "granule-id",
+                short: "g",
+                description: "Granule ID(s) for comparison of collection and granule holdings",
+            }), providers: Cmd.multioption({
+                type: Cmd.optional(Cmd.array(Cmd.string)),
+                long: "provider",
+                short: "p",
+                description: "Provider names(s) for comparison of granule holdings",
+            }), status: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "status",
+                short: "s",
+                description: "Status filter for Granule Inventory reports",
+            }), startTimestamp: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "start-timestamp",
+                description: "Data older than this will be ignored in the generated report." +
+                    " Any input valid for a JavaScript Date contstructor, including ISO8601.",
+            }), endTimestamp: Cmd.option({
+                type: Cmd.optional(Cmd.string),
+                long: "end-timestamp",
+                description: "Data newer than this will be ignored in the generated report." +
+                    " Any input valid for a JavaScript Date contstructor, including ISO8601.",
+            }) }),
+        handler: (_a) => {
+            var { prefix, collectionIds, granuleIds, providers } = _a, data = __rest(_a, ["prefix", "collectionIds", "granuleIds", "providers"]);
+            return client.post("/reconciliationReports")(Object.assign(Object.assign(Object.assign({ prefix,
+                data }, ((collectionIds === null || collectionIds === void 0 ? void 0 : collectionIds.length) ? { collectionId: collectionIds } : {})), ((granuleIds === null || granuleIds === void 0 ? void 0 : granuleIds.length) ? { granuleId: granuleIds } : {})), ((providers === null || providers === void 0 ? void 0 : providers.length) ? { provider: providers } : {})));
+        },
+    });
+}
+//------------------------------------------------------------------------------
 // Helpers
 //------------------------------------------------------------------------------
 function safe(f) {
@@ -872,9 +1044,9 @@ function request({ prefix, method, path, params, data, invoke = cumulusApiClient
     // UGLY HACK!
     const debug = Boolean(process.env.DEBUG);
     if (debug) {
-        console.log("REQUEST:", payload);
+        console.error("REQUEST:", payload);
     }
-    return invoke(invokeParams).then(fp.pipe(fp.tap((response) => debug && console.log("RESPONSE:", response)), fp.propOr("{}")("body"), fp.wrap(JSON.parse), fp.attempt, fp.cond([
+    return invoke(invokeParams).then(fp.pipe(fp.tap((response) => debug && console.error("RESPONSE:", response)), fp.propOr("{}")("body"), fp.wrap(JSON.parse), fp.attempt, fp.cond([
         [fp.isError, (error) => Promise.reject(error)],
         [
             fp.overEvery([fp.prop("error"), fp.prop("message")]),
