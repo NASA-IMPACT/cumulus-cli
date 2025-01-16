@@ -722,6 +722,7 @@ function rulesCmd(client) {
             add: addRuleCmd(client),
             replace: replaceRuleCmd(client),
             upsert: upsertRuleCmd(client),
+            patch: patchRuleCmd(client),
             delete: deleteRuleCmd(client),
             enable: setRuleStateCmd(client, "ENABLED"),
             disable: setRuleStateCmd(client, "DISABLED"),
@@ -814,6 +815,30 @@ function upsertRuleCmd(client) {
 }
 function upsertRule(client) {
     return (params) => replaceRule(client)(params).catch((error) => error.statusCode === 404 ? addRule(client)(params) : Promise.reject(error));
+}
+function patchRuleCmd(client) {
+    return Cmd.command({
+        name: "patch",
+        description: "Patch an existing rule",
+        args: Object.assign(Object.assign({}, globalArgs), { data: Cmd.option({
+                type: JSONData,
+                long: "data",
+                short: "d",
+                description: "Path to JSON file, or JSON string of rule definition",
+            }) }),
+        handler: patchRule(client),
+    });
+}
+function patchRule(client) {
+    return ({ prefix, data }) => {
+        const result = safe(JSON.parse)(data);
+        return Result.isOk(result)
+            ? client.patch(`/rules/${result.value.name}`)({
+                prefix,
+                data: result.value,
+            })
+            : Promise.reject(result.error);
+    };
 }
 function runRuleCmd(client) {
     return Cmd.command({
